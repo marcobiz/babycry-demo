@@ -1,0 +1,103 @@
+name: Analyze Baby Cry
+
+on:
+  repository_dispatch:
+    types: [analyze-audio]
+
+jobs:
+  analyze:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone DeepInfant
+        run: |
+          git clone https://github.com/skytells-research/DeepInfant.git
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install coremltools librosa numpy
+
+      - name: Decode and analyze audio
+        run: |
+          python << 'EOF'
+          import base64
+          import json
+          import numpy as np
+          import librosa
+          import coremltools as ct
+          import os
+
+          # Get audio data from event payload
+          audio_b64 = '''${{ github.event.client_payload.audio }}'''
+          request_id = '''${{ github.event.client_payload.request_id }}'''
+
+          # Decode audio
+          audio_bytes = base64.b64decode(audio_b64)
+          with open('input_audio.wav', 'wb') as f:
+              f.write(audio_bytes)
+
+          print(f"Request ID: {request_id}")
+          print(f"Audio file size: {len(audio_bytes)} bytes")
+
+          # Load model
+          model_path = "DeepInfant/Models/DeepInfant_V2.mlmodel"
+          model = ct.models.MLModel(model_path)
+
+          # Get model input spec
+          spec = model.get_spec()
+          input_name = spec.description.input[0].name
+          print(f"Model input: {input_name}")
+
+          # Load and preprocess audio
+          waveform, sr = librosa.load('input_audio.wav', sr=16000, mono=True)
+
+          # Model expects 15600 samples (0.975s at 16kHz)
+          target_samples = 15600
+          if len(waveform) > target_samples:
+              waveform = waveform[:target_samples]
+          else:
+              waveform = np.pad(waveform, (0, target_samples - len(waveform)))
+
+          # Predict
+          prediction = model.predict({input_name: waveform.astype(np.float32)})
+
+          predicted_label = prediction.get('target', prediction.get('classLabel', 'unknown'))
+
+          # Get probabilities if available
+          probs = prediction.get('targetProbability', prediction.get('classLabelProbs', {}))
+          confidence = probs.get(predicted_label, 0.0) if probs else 0.0
+
+          result = {
+              'request_id': request_id,
+              'prediction': predicted_label,
+              'confidence': float(confidence),
+              'all_probabilities': {k: float(v) for k, v in probs.items()} if probs else {}
+          }
+
+          print(f"\nResult: {json.dumps(result, indent=2)}")
+
+          with open('prediction_result.json', 'w') as f:
+              json.dump(result, f, indent=2)
+
+          EOF
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: prediction-${{ github.event.client_payload.request_id }}
+          path: prediction_result.json
+          retention-days: 1
+
+      - name: Output result
+        id: result
+        run: |
+          cat prediction_result.json
+          echo "result=$(cat prediction_result.json | tr -d '\n')" >> $GITHUB_OUTPUT
