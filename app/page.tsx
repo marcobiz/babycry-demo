@@ -10,16 +10,16 @@ type AnalysisResult = {
   error?: string
 }
 
-const LABELS: Record<string, { emoji: string; tip: string }> = {
-  hungry: { emoji: '🍼', tip: 'Prova a nutrire il bambino' },
-  tired: { emoji: '😴', tip: 'Il bambino potrebbe aver bisogno di dormire' },
-  belly_pain: { emoji: '🤕', tip: 'Controlla coliche o gas' },
-  discomfort: { emoji: '😣', tip: 'Controlla pannolino o temperatura' },
-  burping: { emoji: '💨', tip: 'Prova a far fare il ruttino' },
-  cold_hot: { emoji: '🌡️', tip: 'Controlla la temperatura della stanza' },
-  lonely: { emoji: '🤗', tip: 'Il bambino vuole attenzione' },
-  scared: { emoji: '😨', tip: 'Conforta il tuo bambino' },
-  unknown: { emoji: '❓', tip: 'Controlla il tuo bambino' },
+const LABELS: Record<string, { emoji: string; name: string; tip: string }> = {
+  hungry: { emoji: '🍼', name: 'Fame', tip: 'Prova a nutrire il bambino' },
+  tired: { emoji: '😴', name: 'Stanchezza', tip: 'Il bambino potrebbe aver bisogno di dormire' },
+  belly_pain: { emoji: '🤕', name: 'Mal di pancia', tip: 'Controlla coliche o gas' },
+  discomfort: { emoji: '😣', name: 'Disagio', tip: 'Controlla pannolino o temperatura' },
+  burping: { emoji: '💨', name: 'Ruttino', tip: 'Prova a far fare il ruttino' },
+  cold_hot: { emoji: '🌡️', name: 'Caldo/Freddo', tip: 'Controlla la temperatura della stanza' },
+  lonely: { emoji: '🤗', name: 'Solitudine', tip: 'Il bambino vuole attenzione' },
+  scared: { emoji: '😨', name: 'Paura', tip: 'Conforta il tuo bambino' },
+  unknown: { emoji: '❓', name: 'Sconosciuto', tip: 'Controlla il tuo bambino' },
 }
 
 export default function Home() {
@@ -158,11 +158,8 @@ export default function Home() {
     }}>
       <div style={{ width: '100%', marginTop: '2rem' }}>
         <h1 style={{ fontSize: '1.8rem', marginBottom: '0.3rem', fontWeight: '600', color: '#1F2937' }}>
-          BabyCry Analyzer
+          Analizzatore Pianto Bebè
         </h1>
-        <p style={{ color: '#9CA3AF', fontSize: '0.9rem', marginBottom: '0' }}>
-          Skytells AI Research
-        </p>
       </div>
 
       {!audioBlob && !result && !analyzing && (
@@ -278,10 +275,9 @@ export default function Home() {
               fontSize: '1.5rem',
               color: result.prediction === 'hungry' ? '#EF4444' : '#10B981',
               marginBottom: '0.5rem',
-              fontWeight: '500',
-              textTransform: 'capitalize'
+              fontWeight: '500'
             }}>
-              {result.prediction.replace('_', ' ')}
+              {LABELS[result.prediction]?.name || result.prediction.replace('_', ' ')}
             </h2>
             <p style={{ color: '#9CA3AF', fontSize: '0.95rem' }}>
               {LABELS[result.prediction]?.tip || 'Controlla il tuo bambino'}
@@ -305,8 +301,8 @@ export default function Home() {
                   .slice(0, 3)
                   .map(([label, prob]) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ textTransform: 'capitalize', fontSize: '0.9rem', color: '#4B5563' }}>
-                      {LABELS[label]?.emoji || '❓'} {label.replace('_', ' ')}
+                    <span style={{ fontSize: '0.9rem', color: '#4B5563' }}>
+                      {LABELS[label]?.emoji || '❓'} {LABELS[label]?.name || label.replace('_', ' ')}
                     </span>
                     <span style={{ color: '#9CA3AF', fontSize: '0.9rem' }}>
                       {((prob as number) * 100).toFixed(1)}%

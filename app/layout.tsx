@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'BabyCry Analyzer',
+  title: 'Analizzatore Pianto Bebè',
   description: 'Analizza il pianto del tuo bambino usando l\'intelligenza artificiale',
 }
 
