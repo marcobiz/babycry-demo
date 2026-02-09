@@ -20,14 +20,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No audio file' }, { status: 400 })
     }
 
-    // Convert audio to base64
     const arrayBuffer = await audioFile.arrayBuffer()
     const base64Audio = Buffer.from(arrayBuffer).toString('base64')
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
     console.log(`[${requestId}] Starting analysis, audio size: ${arrayBuffer.byteLength} bytes`)
 
-    // Trigger GitHub Actions workflow
+    // Step 1: Create a Gist with the audio data
+    const gistResponse = await fetch('https://api.github.com/gists', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        description: `BabyCry audio ${requestId}`,
+        public: false,
+        files: {
+          'audio.txt': {
+            content: base64Audio
+          }
+        }
+      })
+    })
+
+    if (!gistResponse.ok) {
+      const error = await gistResponse.text()
+      console.error('Gist creation failed:', error)
+      return NextResponse.json({
+        error: 'Failed to upload audio',
+        details: error
+      }, { status: 500 })
+    }
+
+    const gistData = await gistResponse.json()
+    const gistRawUrl = gistData.files['audio.txt'].raw_url
+    const gistId = gistData.id
+
+    console.log(`[${requestId}] Audio uploaded to gist: ${gistId}`)
+
+    // Step 2: Trigger GitHub Actions workflow with gist URL
     const dispatchResponse = await fetch(
       `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/dispatches`,
       {
@@ -40,7 +73,8 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           event_type: 'analyze-audio',
           client_payload: {
-            audio: base64Audio,
+            audio_url: gistRawUrl,
+            gist_id: gistId,
             request_id: requestId
           }
         })
@@ -50,6 +84,8 @@ export async function POST(request: NextRequest) {
     if (!dispatchResponse.ok) {
       const error = await dispatchResponse.text()
       console.error('Dispatch failed:', error)
+      // Clean up gist
+      await deleteGist(gistId)
       return NextResponse.json({
         error: 'Failed to trigger analysis',
         details: error
@@ -58,8 +94,11 @@ export async function POST(request: NextRequest) {
 
     console.log(`[${requestId}] Workflow triggered, waiting for completion...`)
 
-    // Poll for workflow completion (max 3 minutes)
+    // Step 3: Poll for workflow completion
     const result = await pollForResult(requestId, 180)
+
+    // Clean up gist
+    await deleteGist(gistId)
 
     if (result) {
       return NextResponse.json(result)
@@ -80,15 +119,28 @@ export async function POST(request: NextRequest) {
   }
 }
 
+async function deleteGist(gistId: string) {
+  try {
+    await fetch(`https://api.github.com/gists/${gistId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+      }
+    })
+  } catch (e) {
+    console.error('Failed to delete gist:', e)
+  }
+}
+
 async function pollForResult(requestId: string, maxSeconds: number): Promise<any> {
   const startTime = Date.now()
-  const pollInterval = 5000 // 5 seconds
+  const pollInterval = 5000
 
   while ((Date.now() - startTime) < maxSeconds * 1000) {
     await new Promise(resolve => setTimeout(resolve, pollInterval))
 
     try {
-      // Get recent workflow runs
       const runsResponse = await fetch(
         `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs?event=repository_dispatch&per_page=5`,
         {
@@ -105,7 +157,6 @@ async function pollForResult(requestId: string, maxSeconds: number): Promise<any
 
       for (const run of runsData.workflow_runs || []) {
         if (run.status === 'completed' && run.conclusion === 'success') {
-          // Check artifacts for our request
           const artifactsResponse = await fetch(
             `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs/${run.id}/artifacts`,
             {
@@ -122,7 +173,6 @@ async function pollForResult(requestId: string, maxSeconds: number): Promise<any
 
           for (const artifact of artifactsData.artifacts || []) {
             if (artifact.name === `prediction-${requestId}`) {
-              // Download artifact
               const downloadResponse = await fetch(artifact.archive_download_url, {
                 headers: {
                   'Authorization': `Bearer ${GITHUB_TOKEN}`,
@@ -131,7 +181,6 @@ async function pollForResult(requestId: string, maxSeconds: number): Promise<any
               })
 
               if (downloadResponse.ok) {
-                // Artifact is a zip file, need to extract
                 const zipBuffer = await downloadResponse.arrayBuffer()
                 const result = await extractResultFromZip(zipBuffer)
                 if (result) return result
@@ -149,12 +198,8 @@ async function pollForResult(requestId: string, maxSeconds: number): Promise<any
 }
 
 async function extractResultFromZip(zipBuffer: ArrayBuffer): Promise<any> {
-  // Simple zip extraction for single JSON file
-  // GitHub artifacts are zipped
   try {
-    const { Readable } = await import('stream')
     const AdmZip = (await import('adm-zip')).default
-
     const zip = new AdmZip(Buffer.from(zipBuffer))
     const entries = zip.getEntries()
 

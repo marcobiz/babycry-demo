@@ -23,9 +23,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install coremltools librosa numpy
+          pip install coremltools librosa numpy requests
 
-      - name: Decode and analyze audio
+      - name: Download and analyze audio
         run: |
           python << 'EOF'
           import base64
@@ -33,18 +33,24 @@ jobs:
           import numpy as np
           import librosa
           import coremltools as ct
-          import os
+          import requests
 
-          # Get audio data from event payload
-          audio_b64 = '''${{ github.event.client_payload.audio }}'''
+          # Get audio URL from event payload
+          audio_url = '''${{ github.event.client_payload.audio_url }}'''
           request_id = '''${{ github.event.client_payload.request_id }}'''
+
+          print(f"Request ID: {request_id}")
+          print(f"Downloading audio from gist...")
+
+          # Download base64 audio from gist
+          response = requests.get(audio_url)
+          audio_b64 = response.text
 
           # Decode audio
           audio_bytes = base64.b64decode(audio_b64)
           with open('input_audio.wav', 'wb') as f:
               f.write(audio_bytes)
 
-          print(f"Request ID: {request_id}")
           print(f"Audio file size: {len(audio_bytes)} bytes")
 
           # Load model
@@ -95,9 +101,3 @@ jobs:
           name: prediction-${{ github.event.client_payload.request_id }}
           path: prediction_result.json
           retention-days: 1
-
-      - name: Output result
-        id: result
-        run: |
-          cat prediction_result.json
-          echo "result=$(cat prediction_result.json | tr -d '\n')" >> $GITHUB_OUTPUT
